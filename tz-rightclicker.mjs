@@ -1,8 +1,10 @@
 import { writeFile } from 'fs/promises';
 
 import fetch from 'node-fetch'
+import AbortController from 'abort-controller'
 
 import { createRequire } from 'module'
+import { setFlagsFromString } from 'v8';
 const require = createRequire(import.meta.url);
 const { Pool } = require('pg');
 
@@ -23,6 +25,38 @@ const db_connection = {
 //
 
 let pool = new Pool(db_connection);
+
+const SafeFetcher = function({ timeout_ms, minperiod_ms }) {
+	let lastFetch = 0;
+	return async function(url) {
+    console.log('Fetching url', url);
+		while (true) {
+			let to_wait_ms = minperiod_ms - (Date.now() - lastFetch);
+			if (to_wait_ms > 0) {
+				await new Promise(_ => setTimeout(_, to_wait_ms));
+			}
+			let abortController = new AbortController();
+			let watchdog = setTimeout(() => {
+				abortController.abort();
+			}, timeout_ms);
+			try {
+				const response = await fetch(url, {signal: abortController.signal});
+				lastFetch = Date.now();
+				if (response.status === 200) {
+					return response;
+				} else {
+					let msg = await response.text();
+					throw new Error(msg);
+				}
+			} catch (error) {
+				console.log("Error while fetching data...", error);
+				console.log("Retrying...");
+			} finally {
+				clearTimeout(watchdog);
+			}		
+		}
+	}
+}
 
 const TOKEN_METADATA_EXTRACTOR_SQL = `SELECT DISTINCT
   token.assets_token_id AS token_id,
@@ -73,21 +107,14 @@ const decode_rows = function(rows) {
 
 const strip_ipfs_link = function(raw) {
 	if (raw.slice(0,7) === "ipfs://") {
-		return raw.slice(7);
-	} else {
-		return null;
+		let hash = raw.slice(7);
+    if (/^Qm[1-9A-HJ-NP-Za-km-z]{44}$/.test(hash)) {
+      return hash;
+    }
 	}
+  console.log('Not a valid IPFS hash..');
+	return null;
 };
-
-const fetch_ipfs = async function(hash) {
-	let result = await fetch(`https://${ipfs_gateway}/${hash}`);
-	if (result.status == 200) {
-	  return result.json();
-	} else {
-		await result.text();
-		throw new Error(result.text);
-	}
-}
 
 const process_link = function(link_string, description, hashmap) {
 	if (link_string) {
@@ -102,6 +129,21 @@ const process_link = function(link_string, description, hashmap) {
 };
 
 const run = async function() {
+	let fetch_ipfs_internal = SafeFetcher({
+		timeout_ms: 10000,
+		minperiod_ms: 500
+	});
+
+	const fetch_ipfs = async function(hash) {
+		let result = await fetch_ipfs_internal(`https://${ipfs_gateway}/${hash}`);
+		try {
+      return await result.json();
+	  } catch (err) {
+      console.error('Non-JSON document retrieved, or cannot parse json.');
+      return null;
+    }
+  };
+
 	let hashes = new Map();
 
 	let contract_metadata_rows = await contract_metadata_extractor();
@@ -110,7 +152,7 @@ const run = async function() {
 
 	for (let row of contract_metadata_rows) {
 		let hash = process_link(row.metadata, `${collection_name}-contract_metadata_(${row.field_name})`, hashes);
-		if (hash) {
+		if (hash) { //don't ask, lol
 			console.log(`Fetching IPFS metadata document for contract level metadata entry '${row.field_name}'..`);
 			let metadata_json = await fetch_ipfs(hash);
 			if (metadata_json) {
@@ -125,6 +167,7 @@ const run = async function() {
 	tokens = decode_rows(tokens);
 
 	for (let row of tokens) {
+    console.log(`Processing token ${row.token_id}:\n`, row);
 		let hash = process_link(row.metadata, `${collection_name}-token_${row.token_id}-descriptor`, hashes);
 		if (hash) {
 			console.log(`Fetching IPFS metadata document for token ${row.token_id}..`);
