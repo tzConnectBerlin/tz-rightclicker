@@ -12,6 +12,7 @@
 	"dependencies": {
 		"abort-controller": "^3.0.0",
 		"node-fetch": "^3.3.0",
-		"pg": "^8.7.3"
+		"pg": "^8.7.3",
+		"@pinata/sdk": "^2.1.0"
 	}
 }

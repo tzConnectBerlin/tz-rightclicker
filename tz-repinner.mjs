@@ -16,7 +16,7 @@ const process_file = async function(filename) {
   let hashes = JSON.parse(file);
   for (let [hash, description] of hashes) {
     console.log('Pinning entry', description);
-    let response = await pinata.pinByHash(hash, { name: description });
+    let response = await pinata.pinByHash(hash, { pinataMetadata: { name: description } });
     console.log(`--> Pin job ${response.id} inserted, status: ${response.status}`);
   }
 };
