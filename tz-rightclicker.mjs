@@ -4,7 +4,6 @@ import fetch from 'node-fetch'
 import AbortController from 'abort-controller'
 
 import { createRequire } from 'module'
-import { setFlagsFromString } from 'v8';
 const require = createRequire(import.meta.url);
 const { Pool } = require('pg');
 
@@ -21,6 +20,7 @@ const db_connection = {
 	"password": "tezos",
 	"database": "tezos"
 };
+const work_directory = "hashes";
 
 //
 
@@ -188,7 +188,7 @@ const run = async function() {
 
 	console.log(`Processing finished, writing hashes to file ${collection_name}_hashes.json`)
 	let hash_array = [...hashes];
-	await writeFile(`${collection_name}_hashes.json`, JSON.stringify(hash_array, null, 4));
+	await writeFile(`${work_directory}/${collection_name}_hashes.json`, JSON.stringify(hash_array, null, 4));
 	console.log('kthxbye!');
 }
 
